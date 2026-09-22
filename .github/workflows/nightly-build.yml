@@ -63,6 +63,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # 与 apps/zcode-cli/packages/cli 的 build:sea 等价，只是把最后的 --all 换成按 runner 拆分的 targets
+      # SEA 资产的 TUI 运行时闭包会经 @zcode/contracts 依赖仓库根的 @zcode/shared，
+      # 缺少根 workspace 的 dist 会在 build-sea 阶段报 "Missing @zcode/shared dist files"。
+      - name: Build root workspace packages
+        run: |
+          pnpm -r --filter "./packages/*" --filter "!@zcode/desktop" build
+
       - name: Build workspace bundles
         run: pnpm exec turbo --skip-infer --cwd apps/zcode-cli run build --filter '!@zcode/cli' --force
 
