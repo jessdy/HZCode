@@ -1,0 +1,84 @@
+name: Nightly SEA Build
+
+on:
+  schedule:
+    # 北京时间每天 0 点（UTC 16:00）。若需要 UTC 0 点，改成 "0 0 * * *"
+    - cron: "0 16 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-sea-build
+  cancel-in-progress: false
+
+env:
+  # 与 mise.toml 中锁定的工具链保持一致
+  NODE_VERSION: "24.14.0"
+  PNPM_VERSION: "10.33.2"
+  # 本工作流只产出 CLI 可执行程序，跳过 Electron 二进制下载以缩短安装时间
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+  HUSKY: "0"
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux
+            targets: linux-x64,linux-arm64
+            artifact: zcode-linux
+          # macOS 目标必须在 macOS runner 上构建，否则缺少 ad-hoc 签名无法运行
+          - os: macos-latest
+            name: macos
+            targets: darwin-arm64,darwin-x64
+            artifact: zcode-darwin
+          - os: windows-latest
+            name: windows
+            targets: win-x64,win-arm64
+            artifact: zcode-windows
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 与 apps/zcode-cli/packages/cli 的 build:sea 等价，只是把最后的 --all 换成按 runner 拆分的 targets
+      - name: Build workspace bundles
+        run: pnpm exec turbo --skip-infer --cwd apps/zcode-cli run build --filter '!@zcode/cli' --force
+
+      - name: Build CLI bundle
+        run: pnpm --dir apps/zcode-cli/packages/cli run build
+
+      - name: Build SEA binaries (${{ matrix.targets }})
+        run: node apps/zcode-cli/packages/cli/scripts/build-sea.mjs --targets ${{ matrix.targets }}
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ github.run_number }}
+          path: |
+            apps/zcode-cli/packages/cli/dist/zcode-linux-*
+            apps/zcode-cli/packages/cli/dist/zcode-darwin-*
+            apps/zcode-cli/packages/cli/dist/zcode-windows-*
+          if-no-files-found: error
+          retention-days: 14
