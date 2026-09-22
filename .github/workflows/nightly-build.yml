@@ -93,3 +93,57 @@ jobs:
             apps/zcode-cli/packages/cli/dist/zcode-windows-*
           if-no-files-found: error
           retention-days: 14
+
+  release:
+    name: Publish nightly release
+    needs: build
+    # 某个平台构建失败时仍发布其余已成功的产物
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zcode-*
+          path: dist
+          merge-multiple: true
+
+      # release asset 不保留可执行位，这里显式恢复
+      - name: Restore executable bits
+        run: |
+          chmod +x dist/zcode-linux-* dist/zcode-darwin-* || true
+          ls -lh dist
+
+      - name: Compose release notes
+        id: notes
+        run: |
+          echo "date=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+          {
+            echo "ZCode CLI nightly build（单文件可执行程序）。"
+            echo
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- 构建时间: $(date -u +'%Y-%m-%d %H:%M UTC')"
+            echo "- 平台: linux x64/arm64、macOS x64/arm64、Windows x64/arm64"
+            echo
+            echo "Linux/macOS 下载后执行 \`chmod +x zcode-*\`；macOS 产物已 ad-hoc 签名。"
+          } > release-notes.md
+
+      # 固定 tag `nightly`，每次运行更新同一个预发布版本并覆盖同名资产
+      - name: Publish nightly release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: Nightly ${{ steps.notes.outputs.date }} (#${{ github.run_number }})
+          body_path: release-notes.md
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/zcode-linux-*
+            dist/zcode-darwin-*
+            dist/zcode-windows-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
