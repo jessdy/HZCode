@@ -69,6 +69,11 @@ jobs:
         run: |
           pnpm -r --filter "./packages/*" --filter "!@zcode/desktop" build
 
+      # @zcode/contracts 依赖 @zcode/shared，而后者只导出 src 且没有 build 脚本；
+      # SEA 运行时闭包要求 workspace 包带 dist/index.js，这里用其 tsconfig 显式编译。
+      - name: Build @zcode/shared
+        run: pnpm exec tsc -b packages/shared
+
       - name: Build workspace bundles
         run: pnpm exec turbo --skip-infer --cwd apps/zcode-cli run build --filter '!@zcode/cli' --force
 
